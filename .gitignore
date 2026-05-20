@@ -1,0 +1,4 @@
+credentials.json
+balcao_virtual.db
+__pycache__/
+.streamlit/
