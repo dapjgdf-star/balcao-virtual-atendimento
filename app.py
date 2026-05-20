@@ -28,8 +28,17 @@ if menu == "Área do Usuário (Agendamento)":
     # --- FLUXO DE CONFIRMAÇÃO PERSISTENTE ---
     if "sucesso_agendamento" in st.session_state:
         detalhes = st.session_state["sucesso_agendamento"]
-        st.success("🎉 Agendamento realizado com sucesso!")
-        st.balloons()
+        
+        # CORREÇÃO CRÍTICA: Se o link for do tipo "fail-vrt", mostra aviso legível com o erro real do Google Agenda
+        if "fail-vrt" in detalhes['link']:
+            st.error("⚠️ **O agendamento foi salvo localmente, mas não pôde ser sincronizado com a sua Agenda do Google.**")
+            if "ultimo_erro_google" in st.session_state:
+                st.markdown("### 🔍 Detalhes Técnicos do Erro:")
+                st.code(st.session_state["ultimo_erro_google"], language="text")
+                st.info("Utilize as informações acima para ajustar as permissões ou fuso horário no painel de controle.")
+        else:
+            st.success("🎉 Agendamento realizado com sucesso!")
+            st.balloons()
         
         st.subheader("📋 Detalhes do seu Atendimento")
         st.info(f"**Importante:** Um convite oficial do Google Agenda contendo o link do Meet foi enviado para o e-mail **{detalhes['email']}**.")
@@ -39,7 +48,10 @@ if menu == "Área do Usuário (Agendamento)":
         st.markdown(f"**Nome do Solicitante:** {detalhes['nome']}")
         
         st.code(f"Link da sua sala virtual: {detalhes['link']}", language="text")
-        st.markdown(f"### [👉 Clique aqui para entrar direto no Google Meet]({detalhes['link']})")
+        
+        # Só exibe o link direto do Meet se não for um link de falha
+        if "fail-vrt" not in detalhes['link']:
+            st.markdown(f"### [👉 Clique aqui para entrar direto no Google Meet]({detalhes['link']})")
         
         if st.button("Agendar outro Horário", type="primary", use_container_width=True):
             del st.session_state["sucesso_agendamento"]
@@ -134,7 +146,6 @@ elif menu == "Painel do Administrador":
     st.write(f"Perfil de monitoramento ativo: **{CALENDAR_ID}**")
     
     # --- VISUALIZADOR DE ERROS DE CONEXÃO DO GOOGLE ---
-    # Mostra de forma clara e legível ao administrador se a conexão com o Google falhar
     if "erro_autenticacao" in st.session_state:
         st.error(f"❌ **Falha na Conexão Google (Nuvem):** {st.session_state['erro_autenticacao']}")
     if "ultimo_erro_google" in st.session_state:
