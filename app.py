@@ -284,7 +284,7 @@ st.set_page_config(page_title="Balcão Virtual de Atendimento", layout="wide", p
 
 inicializar_banco()
 
-st.title("🏫 Balcão de Atendimento Virtual")
+st.title("🏫 Balcão de Atendimento Virtual - Super Janela 2025 PDM")
 st.write("Agende um horário para esclarecer as suas dúvidas através do Google Meet. Cada sessão tem a duração de 30 minutos.")
 
 menu = st.sidebar.radio("Navegar por:", ["Área do Utilizador (Agendamento)", "Painel do Administrador"])
@@ -372,7 +372,7 @@ if menu == "Área do Utilizador (Agendamento)":
                 st.write("---")
                 st.subheader(f"Confirmar Agendamento para às {st.session_state['horario_texto']}")
                 
-                with st.form(key="form_agendamento", clear_on_submit=True):
+                with st.form(key="form_agendamento", clear_on_submit=False):
                     nome = st.text_input("Seu Nome Completo *")
                     email = st.text_input("Seu E-mail *")
                     telefone = st.text_input("Seu Telefone/WhatsApp com 9 dígitos * (Ex: (61) 99999-9999)")
@@ -385,35 +385,42 @@ if menu == "Área do Utilizador (Agendamento)":
                             st.error("Por favor, preencha todos os campos obrigatórios marcados com (*).")
                         elif "@" not in email:
                             st.error("Insira um endereço de e-mail válido.")
-                        # --- VALIDAÇÃO RIGOROSA DO FORMATO (XX) XXXXX-XXXX ---
-                        elif not re.match(r"^\(\d{2}\) \d{5}-\d{4}$", telefone):
-                            st.error("⚠️ Formato de telefone inválido! Use exatamente o formato (XX) XXXXX-XXXX, contendo os 9 dígitos do telemóvel.")
                         else:
-                            with st.spinner("A reservar horário e a confirmar sala no Google Meet..."):
-                                link_meet = realizar_agendamento(
-                                    st.session_state["id_selecionado"], 
-                                    nome, 
-                                    email, 
-                                    telefone,
-                                    duvida
-                                )
-                                
-                            if link_meet:
-                                st.session_state["sucesso_agendamento"] = {
-                                    "nome": nome,
-                                    "email": email,
-                                    "telefone": telefone,
-                                    "duvida": duvida,
-                                    "link": link_meet,
-                                    "data": data_selecionada.strftime('%d/%m/%Y'),
-                                    "horario": st.session_state['horario_texto']
-                                }
-                                del st.session_state["id_selecionado"]
-                                if "horario_texto" in st.session_state:
-                                    del st.session_state["horario_texto"]
-                                st.rerun()
+                            # --- MÁSCARA INTELIGENTE (BACKEND) ---
+                            # Filtra e extrai absolutamente tudo o que não for número
+                            numeros_telefone = re.sub(r'\D', '', telefone)
+                            
+                            if len(numeros_telefone) != 11:
+                                st.error("⚠️ Formato de telefone inválido! O número deve conter exatamente 11 dígitos (2 do DDD + 9 do telemóvel).")
                             else:
-                                st.error("Este horário acabou de ser reservado por outro utilizador. Escolha outro slot.")
+                                # Formata automaticamente para salvar limpo e padronizado na base
+                                telefone_formatado = f"({numeros_telefone[:2]}) {numeros_telefone[2:7]}-{numeros_telefone[7:]}"
+                                
+                                with st.spinner("A reservar horário e a confirmar sala no Google Meet..."):
+                                    link_meet = realizar_agendamento(
+                                        st.session_state["id_selecionado"], 
+                                        nome, 
+                                        email, 
+                                        telefone_formatado,
+                                        duvida
+                                    )
+                                    
+                                if link_meet:
+                                    st.session_state["sucesso_agendamento"] = {
+                                        "nome": nome,
+                                        "email": email,
+                                        "telefone": telefone_formatado,
+                                        "duvida": duvida,
+                                        "link": link_meet,
+                                        "data": data_selecionada.strftime('%d/%m/%Y'),
+                                        "horario": st.session_state['horario_texto']
+                                    }
+                                    del st.session_state["id_selecionado"]
+                                    if "horario_texto" in st.session_state:
+                                        del st.session_state["horario_texto"]
+                                    st.rerun()
+                                else:
+                                    st.error("Este horário acabou de ser reservado por outro utilizador. Escolha outro slot.")
 
 # --- VISÃO 2: PAINEL DO ADMINISTRADOR ---
 elif menu == "Painel do Administrador":
