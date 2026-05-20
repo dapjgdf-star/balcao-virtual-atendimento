@@ -6,7 +6,8 @@ from database import (
     listar_slots_por_data, 
     realizar_agendamento, 
     obter_agendamentos_completos,
-    CALENDAR_ID  # Importação adicionada para corrigir o NameError
+    CALENDAR_ID,
+    limpar_banco  # Importação adicionada para a funcionalidade de reset
 )
 
 # Configurações de layout da página
@@ -15,8 +16,8 @@ st.set_page_config(page_title="Balcão Virtual de Atendimento", layout="wide", p
 # Garante inicialização e carga primária do banco
 inicializar_banco()
 
-st.title("🏫 Balcão de Atendimento Virtual - Super Janela 2025 PDM")
-st.write("Agende um horário para tirar suas dúvidas via Google Meet. Cada sessão dura no máximo 30 minutos.")
+st.title("🏫 Balcão de Atendimento Virtual")
+st.write("Agende um horário para tirar suas dúvidas via Google Meet. Cada sessão dura 30 minutos.")
 
 # Navegação lateral discreta entre as visões do sistema
 menu = st.sidebar.radio("Navegar por:", ["Área do Usuário (Agendamento)", "Painel do Administrador"])
@@ -27,7 +28,7 @@ if menu == "Área do Usuário (Agendamento)":
     
     # Limita o calendário do Streamlit estritamente dentro da vigência configurada
     data_minima = datetime.date(2026, 5, 21)
-    data_maxima = datetime.date(2026, 5, 29)
+    data_maxima = datetime.date(2026, 5, 29)  # Trava manual ajustada para 29/05/2026
     
     # Seletor de data formatado no padrão brasileiro DD/MM/AAAA
     data_selecionada = st.date_input(
@@ -35,7 +36,7 @@ if menu == "Área do Usuário (Agendamento)":
         value=data_minima,
         min_value=data_minima,
         max_value=data_maxima,
-        format="DD/MM/YYYY"  # Correção aplicada para formato brasileiro
+        format="DD/MM/YYYY"
     )
     
     data_str = data_selecionada.strftime("%Y-%m-%d")
@@ -46,7 +47,7 @@ if menu == "Área do Usuário (Agendamento)":
     else:
         slots = listar_slots_por_data(data_str)
         
-        st.subheader(f"Horários disponíveis para o turno Matutino em {data_selecionada.strftime('%d/%m/%Y')}:")
+        st.subheader(f"Horários disponíveis para o turno Vespertino em {data_selecionada.strftime('%d/%m/%Y')}:")
         
         # Renderização dos horários em formato de Grid de Cards usando colunas
         cols = st.columns(4)
@@ -71,7 +72,6 @@ if menu == "Área do Usuário (Agendamento)":
                 email = st.text_input("Seu E-mail * (O link do Google Meet será enviado para cá)")
                 duvida = st.text_area("Descreva de forma breve sua dúvida ou assunto *")
                 
-                # Correção do nome da função do botão de envio do formulário
                 enviar = st.form_submit_button("Confirmar Horário de Atendimento")
                 
                 if enviar:
@@ -99,6 +99,7 @@ if menu == "Área do Usuário (Agendamento)":
                             
                             # Limpa o estado da sessão para evitar reenvios acidentais
                             del st.session_state["id_selecionado"]
+                            st.rerun()
                         else:
                             st.error("Este horário acabou de ser reservado por outro usuário. Por favor, escolha outro slot.")
 
@@ -140,3 +141,33 @@ elif menu == "Painel do Administrador":
         * Todos os horários listados acima já constam no seu **Google Agenda** nativo associado ao e-mail cadastrado.
         * As dúvidas foram injetadas diretamente na caixa de descrição do compromisso na agenda para consulta rápida pelo celular.
         """)
+
+    # --- ZONA DE PERIGO (RESET DE DADOS COM CONFIRMAÇÃO) ---
+    st.write("---")
+    st.subheader("⚙️ Zona de Perigo")
+    st.caption("Ações de manutenção do sistema de base de dados.")
+
+    # Inicializa a variável de confirmação no estado da sessão
+    if "confirmar_limpeza" not in st.session_state:
+        st.session_state["confirmar_limpeza"] = False
+
+    if not st.session_state["confirmar_limpeza"]:
+        # Botão primário para iniciar a limpeza
+        if st.button("🔴 Limpar Todos os Agendamentos de Teste", use_container_width=True):
+            st.session_state["confirmar_limpeza"] = True
+            st.rerun()
+    else:
+        # Seção de confirmação estrita solicitada pelo utilizador
+        st.warning("⚠️ **Tem a certeza de que deseja prosseguir com esta ação?** Todos os agendamentos salvos serão eliminados permanentemente e voltarão ao estado Disponível!")
+        
+        col_sim, col_nao = st.columns(2)
+        with col_sim:
+            if st.button("✅ Sim, limpar permanentemente", type="primary", use_container_width=True):
+                limpar_banco()
+                st.success("💥 Base de dados limpa com sucesso! Todos os horários voltaram a ficar disponíveis.")
+                st.session_state["confirmar_limpeza"] = False
+                st.rerun()
+        with col_nao:
+            if st.button("❌ Cancelar", use_container_width=True):
+                st.session_state["confirmar_limpeza"] = False
+                st.rerun()
