@@ -33,7 +33,8 @@ if menu == "Área do Utilizador (Agendamento)":
         if "fail-vrt" in detalhes['link']:
             st.error("⚠️ **O agendamento foi guardado localmente na base de dados, mas não pôde ser sincronizado com o Google Agenda.**")
             if "ultimo_erro_google" in st.session_state:
-                st.markdown("### 🔍 Detalhes Técnicos do Erro:")
+                st.markdown("### 🔍 Detalhes Técnicos do Erro (Exibição Completa Sem Filtro HTML):")
+                # Exibe o log de erro real como código de texto puro, impedindo que o navegador o oculte
                 st.code(st.session_state["ultimo_erro_google"], language="text")
                 st.info("Utilize as informações apresentadas acima para verificar as permissões de partilha ou configurações de rede.")
         else:
@@ -146,16 +147,17 @@ elif menu == "Painel do Administrador":
     st.write(f"Perfil de monitorização ativo: **{CALENDAR_ID}**")
     
     # --- VISUALIZADOR DE ERROS DE CONEXÃO DO GOOGLE ---
-    # Mostra de forma destacada e de fácil leitura ao administrador qualquer erro da API
     if "erro_autenticacao" in st.session_state:
-        st.error(f"❌ **Falha na Ligação Google (Nuvem):** {st.session_state['erro_autenticacao']}")
+        st.error(f"❌ **Falha na Ligação Google (Nuvem):**")
+        st.code(st.session_state['erro_autenticacao'], language="text")
     if "ultimo_erro_google" in st.session_state:
-        st.error(f"❌ **Erro no Registo de Eventos da API:** {st.session_state['ultimo_erro_google']}")
+        st.error(f"❌ **Erro no Registo de Eventos da API:**")
+        st.code(st.session_state['ultimo_erro_google'], language="text")
     
     agendamentos = obter_agendamentos_completos()
     
     if not agendamentos:
-        st.info("Nenhum atendimento foi reservado por utilizadores até ao momento.")
+        st.info("Nenhum atendimento foi reservado por utilizadores até o momento.")
     else:
         st.subheader("Lista Cronológica de Atendimentos Marcados")
         
