@@ -3,6 +3,7 @@ import datetime
 from datetime import timedelta
 import os
 import json
+import uuid  # Adicionado para gerar IDs de requisições de Meet únicos e seguros
 import streamlit as st
 # Bibliotecas oficiais do Google API Client
 from google.oauth2 import service_account
@@ -129,12 +130,16 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
     if not service:
         return f"https://meet.google.com/mock-vrt-{data.replace('-', '')}"
         
-    start_time = f"{data}T{hora_inicio}:00"
-    end_time = f"{data}T{hora_fim}:00"
+    # CORREÇÃO CRÍTICA 1: Formatação RFC3339 estrita adicionando o offset de fuso horário (-03:00) para Brasília
+    start_time = f"{data}T{hora_inicio}:00-03:00"
+    end_time = f"{data}T{hora_fim}:00-03:00"
+    
+    # CORREÇÃO CRÍTICA 2: Gerador de ID de requisição 100% único para evitar erros de duplicidade do Meet no Google
+    unique_request_id = f"req-{data}-{hora_inicio.replace(':', '')}-{str(uuid.uuid4())[:8]}"
     
     event_body = {
         'summary': f'Atendimento Virtual: {nome}',
-        'description': f'Dúvida/Assunto registado pelo utilizador:\n{duvida}',
+        'description': f'Dúvida/Assunto registrado pelo usuário:\n{duvida}',
         'start': {
             'dateTime': start_time,
             'timeZone': 'America/Sao_Paulo',
@@ -143,13 +148,13 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
             'dateTime': end_time,
             'timeZone': 'America/Sao_Paulo',
         },
+        # CORREÇÃO CRÍTICA 3: Removido o CALENDAR_ID da lista de convidados para evitar erro de auto-convite na própria agenda
         'attendees': [
-            {'email': email},
-            {'email': CALENDAR_ID}
+            {'email': email}
         ],
         'conferenceData': {
             'createRequest': {
-                'requestId': f"req-{data}-{hora_inicio.replace(':', '')}",
+                'requestId': unique_request_id,
                 'conferenceSolutionKey': {'type': 'hangoutsMeet'}
             }
         },
@@ -176,6 +181,7 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
             del st.session_state["ultimo_erro_google"]
         return meet_link
     except Exception as e:
+        # Armazena o erro exato retornado pelos servidores do Google para exibição diagnóstica
         st.session_state["ultimo_erro_google"] = f"Falha na API de criação do Google Calendar: {e}"
         return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
 
