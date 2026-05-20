@@ -5,6 +5,7 @@ import sqlite3
 import os
 import json
 import uuid
+import re
 from datetime import timedelta
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -14,6 +15,12 @@ from googleapiclient.errors import HttpError
 DB_NAME = "balcao_virtual.db"
 CALENDAR_ID = "dapj.gdf@gmail.com"
 GOOGLE_CREDENTIALS_FILE = "credentials.json"
+
+# =======================================================
+# ⚠️ INSIRA AQUI O SEU LINK FIXO DO GOOGLE MEET ⚠️
+# =======================================================
+LINK_MEET_FIXO = "https://meet.google.com/pba-tfcu-qvh"
+
 
 # ==========================================
 # SEÇÃO 1: FUNÇÕES DE BACKEND E BASE DE DADOS
@@ -67,7 +74,6 @@ def inicializar_banco():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
-    # Cria a tabela caso não exista (já com a nova estrutura ideal)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS slots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -85,11 +91,9 @@ def inicializar_banco():
     conn.commit()
     
     # --- MIGRAÇÃO AUTOMÁTICA ---
-    # Verifica dinamicamente as colunas existentes na tabela slots
     cursor.execute("PRAGMA table_info(slots)")
     colunas = [coluna[1] for coluna in cursor.fetchall()]
     
-    # Se a coluna 'telefone_usuario' não existir (base antiga), adiciona-a agora sem quebrar nada
     if "telefone_usuario" not in colunas:
         cursor.execute("ALTER TABLE slots ADD COLUMN telefone_usuario TEXT")
         conn.commit()
@@ -125,18 +129,16 @@ def gerar_carga_horarios_fixos(cursor):
         data_atual += timedelta(days=1)
 
 def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, telefone, duvida):
-    """Cria o evento na agenda SEM convidar utilizadores para evitar erro 403."""
+    """Cria o evento na agenda bloqueando o horário e retorna o LINK FIXO."""
     service = obter_servico_google()
     
+    # Se não houver serviço configurado, retorna o link fixo na mesma (fallback)
     if not service:
-        return f"https://meet.google.com/mock-vrt-{data.replace('-', '')}"
+        return LINK_MEET_FIXO
         
     start_time = f"{data}T{hora_inicio}:00-03:00"
     end_time = f"{data}T{hora_fim}:00-03:00"
     
-    unique_request_id = f"req-{data}-{hora_inicio.replace(':', '')}-{str(uuid.uuid4())[:8]}"
-    
-    # Adicionando todos os dados de contato diretamente na descrição do evento na sua agenda
     descricao_completa = f"📞 Telefone/WhatsApp: {telefone}\n✉️ E-mail: {email}\n\n📝 Dúvida/Assunto registado pelo utilizador:\n{duvida}"
     
     event_body = {
@@ -150,13 +152,7 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, telefone,
             'dateTime': end_time,
             'timeZone': 'America/Sao_Paulo',
         },
-        # REMOVIDO: 'attendees': [{'email': email}], -> Isso causava o Erro 403 em contas gratuitas
-        'conferenceData': {
-            'createRequest': {
-                'requestId': unique_request_id,
-                'conferenceSolutionKey': {'type': 'hangoutsMeet'}
-            }
-        },
+        # Lembretes padrão mantidos para si (administrador)
         'reminders': {
             'useDefault': False,
             'overrides': [
@@ -167,17 +163,16 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, telefone,
     }
 
     try:
-        # REMOVIDO: sendUpdates='all' -> Não podemos disparar emails automáticos
+        # Apenas insere o evento de calendário puro, sem requisição de videoconferência da API
         event = service.events().insert(
             calendarId=CALENDAR_ID,
-            body=event_body,
-            conferenceDataVersion=1
+            body=event_body
         ).execute()
         
-        meet_link = event.get('conferenceData', {}).get('entryPoints', [{}])[0].get('uri', '')
         if "ultimo_erro_google" in st.session_state:
             del st.session_state["ultimo_erro_google"]
-        return meet_link
+            
+        return LINK_MEET_FIXO
         
     except HttpError as e:
         try:
@@ -186,10 +181,10 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, telefone,
         except:
             msg_erro = str(e)
         st.session_state["ultimo_erro_google"] = f"Falha na API do Calendário Google: {msg_erro}"
-        return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
+        return LINK_MEET_FIXO
     except Exception as e:
         st.session_state["ultimo_erro_google"] = f"Falha inesperada no registo do evento: {e}"
-        return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
+        return LINK_MEET_FIXO
 
 def listar_slots_por_data(data_str):
     conn = sqlite3.connect(DB_NAME)
@@ -203,7 +198,7 @@ def obter_agendamentos_completos():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT data, horario_inicio, horario_fim, nome_usuario, email_usuario, telefone_usuario, duvida, meet_link 
+        SELECT id, data, horario_inicio, horario_fim, nome_usuario, email_usuario, telefone_usuario, duvida, meet_link 
         FROM slots 
         WHERE status = 'Ocupado'
         ORDER BY data ASC, horario_inicio ASC
@@ -238,6 +233,18 @@ def realizar_agendamento(slot_id, nome, email, telefone, duvida):
     conn.close()
     
     return meet_link if success else None
+
+def cancelar_agendamento_local(slot_id):
+    """Limpa os dados do utilizador e liberta o horário novamente."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE slots
+        SET status = 'Disponivel', nome_usuario = NULL, email_usuario = NULL, telefone_usuario = NULL, duvida = NULL, meet_link = NULL
+        WHERE id = ?
+    ''', (slot_id,))
+    conn.commit()
+    conn.close()
 
 def limpar_banco():
     conn = sqlite3.connect(DB_NAME)
@@ -288,15 +295,12 @@ if menu == "Área do Utilizador (Agendamento)":
     if "sucesso_agendamento" in st.session_state:
         detalhes = st.session_state["sucesso_agendamento"]
         
-        if "fail-vrt" in detalhes['link']:
-            st.error("⚠️ **O agendamento foi guardado localmente na base de dados, mas não pôde ser sincronizado com o Google Agenda.**")
-            if "ultimo_erro_google" in st.session_state:
-                st.markdown("### 🔍 Detalhes Técnicos do Erro:")
-                st.code(st.session_state["ultimo_erro_google"], language="text")
-                st.info("O suporte técnico deve verificar as chaves no Streamlit Cloud.")
-        else:
-            st.success("🎉 Agendamento realizado com sucesso e link do Meet gerado!")
-            st.balloons()
+        st.success("🎉 Agendamento realizado com sucesso e link do Meet gerado!")
+        st.balloons()
+        
+        # Avisos técnicos se o calendário falhar, mas o agendamento local (link fixo) prosseguir
+        if "ultimo_erro_google" in st.session_state:
+            st.warning("⚠️ **Aviso Interno:** O horário foi garantido e o link gerado, mas o administrador terá de visualizar a reunião pelo painel (falha de sincronização visual na Nuvem).")
         
         st.subheader("📋 Detalhes do seu Atendimento")
         st.info("Guarde as informações abaixo. Para sua segurança e privacidade, descarregue o seu cartão de agendamento através do botão ao final da página.")
@@ -308,12 +312,10 @@ if menu == "Área do Utilizador (Agendamento)":
         
         st.code(f"Link da sua sala virtual: {detalhes['link']}", language="text")
         
-        if "fail-vrt" not in detalhes['link']:
-            st.markdown(f"### [👉 Clique aqui para testar o acesso à sala do Google Meet]({detalhes['link']})")
+        st.markdown(f"### [👉 Clique aqui para testar o acesso à sala do Google Meet]({detalhes['link']})")
         
         st.write("---")
         
-        # Gera o botão de download com o texto do cartão
         conteudo_cartao = gerar_texto_cartao(detalhes)
         nome_ficheiro = f"Cartao_Agendamento_{detalhes['data'].replace('/', '-')}.txt"
         
@@ -326,7 +328,7 @@ if menu == "Área do Utilizador (Agendamento)":
             use_container_width=True
         )
 
-        st.write(" ") # Espaçamento
+        st.write(" ")
         
         if st.button("Agendar outro Horário", use_container_width=True):
             del st.session_state["sucesso_agendamento"]
@@ -373,7 +375,7 @@ if menu == "Área do Utilizador (Agendamento)":
                 with st.form(key="form_agendamento", clear_on_submit=True):
                     nome = st.text_input("Seu Nome Completo *")
                     email = st.text_input("Seu E-mail *")
-                    telefone = st.text_input("Seu Telefone ou WhatsApp * (Ex: 61 99999-9999)")
+                    telefone = st.text_input("Seu Telefone/WhatsApp com 9 dígitos * (Ex: (61) 99999-9999)")
                     duvida = st.text_area("Descreva de forma breve a sua dúvida ou assunto *")
                     
                     enviar = st.form_submit_button("Confirmar Horário de Atendimento")
@@ -383,8 +385,11 @@ if menu == "Área do Utilizador (Agendamento)":
                             st.error("Por favor, preencha todos os campos obrigatórios marcados com (*).")
                         elif "@" not in email:
                             st.error("Insira um endereço de e-mail válido.")
+                        # --- VALIDAÇÃO RIGOROSA DO FORMATO (XX) XXXXX-XXXX ---
+                        elif not re.match(r"^\(\d{2}\) \d{5}-\d{4}$", telefone):
+                            st.error("⚠️ Formato de telefone inválido! Use exatamente o formato (XX) XXXXX-XXXX, contendo os 9 dígitos do telemóvel.")
                         else:
-                            with st.spinner("A reservar horário e a gerar sala no Google Meet..."):
+                            with st.spinner("A reservar horário e a confirmar sala no Google Meet..."):
                                 link_meet = realizar_agendamento(
                                     st.session_state["id_selecionado"], 
                                     nome, 
@@ -427,8 +432,9 @@ elif menu == "Painel do Administrador":
     else:
         st.subheader("Lista Cronológica de Atendimentos Marcados")
         
-        # Colunas atualizadas para incluir o Telefone
-        df = pd.DataFrame(agendamentos, columns=[
+        # Ignora o ID para exibição nativa no DataFrame Pandas
+        dados_exibicao = [ag[1:] for ag in agendamentos]
+        df = pd.DataFrame(dados_exibicao, columns=[
             "Data", "Início", "Fim", "Nome do Utilizador", "E-mail", "Telefone", "Dúvida / Assunto", "Link Google Meet"
         ])
         
@@ -444,13 +450,24 @@ elif menu == "Painel do Administrador":
             mime="text/csv"
         )
         
+        # --- ZONA DE CANCELAMENTO (ADMIN) ---
         st.write("---")
-        st.subheader("💡 Dica de Fluxo de Trabalho")
-        st.markdown("""
-        * O bloqueio automático de emails do Google para contas gratuitas foi contornado.
-        * Todos os eventos estão no seu Calendário, com os links do Meet perfeitamente gerados.
-        * Os dados de contato (E-mail e Telefone/WhatsApp) estão visíveis no próprio evento da Agenda!
-        """)
+        st.subheader("🗑️ Cancelar um Atendimento")
+        st.write("Liberta o horário no sistema para que outro utilizador o possa reservar.")
+        
+        # Mapeia os dados para exibição amigável no selectbox
+        opcoes_cancelamento = {
+            f"{pd.to_datetime(ag[1]).strftime('%d/%m/%Y')} às {ag[2]} - {ag[4]}": ag[0] for ag in agendamentos
+        }
+        
+        agendamento_selecionado = st.selectbox("Selecione o atendimento a cancelar:", list(opcoes_cancelamento.keys()))
+        
+        if st.button("🗑️ Cancelar Atendimento Selecionado", type="primary"):
+            id_para_cancelar = opcoes_cancelamento[agendamento_selecionado]
+            cancelar_agendamento_local(id_para_cancelar)
+            st.success(f"Atendimento de '{agendamento_selecionado.split(' - ')[1]}' cancelado com sucesso. O horário encontra-se novamente livre.")
+            st.info("💡 Lembrete: Se o evento já tiver sido criado no seu Google Agenda, apague-o manualmente por lá também.")
+            st.rerun()
 
     st.write("---")
     st.subheader("⚙️ Zona de Perigo")
@@ -460,17 +477,17 @@ elif menu == "Painel do Administrador":
         st.session_state["confirmar_limpeza"] = False
 
     if not st.session_state["confirmar_limpeza"]:
-        if st.button("🔴 Limpar Todos os Agendamentos de Teste", use_container_width=True):
+        if st.button("🔴 Limpar Todos os Agendamentos da Base de Dados", use_container_width=True):
             st.session_state["confirmar_limpeza"] = True
             st.rerun()
     else:
-        st.warning("⚠️ **Tem a certeza de que deseja prosseguir com esta ação?** Todos os agendamentos salvos serão eliminados permanentemente e a estrutura será atualizada com a nova coluna de Telefone.")
+        st.warning("⚠️ **Tem a certeza de que deseja prosseguir com esta ação?** Todos os agendamentos salvos serão eliminados permanentemente e todos os horários ficarão disponíveis.")
         
         col_sim, col_nao = st.columns(2)
         with col_sim:
-            if st.button("✅ Sim, limpar e atualizar a base", type="primary", use_container_width=True):
+            if st.button("✅ Sim, limpar e restaurar base", type="primary", use_container_width=True):
                 limpar_banco()
-                st.success("💥 Base de dados recriada com sucesso! A nova estrutura já está pronta a ser utilizada.")
+                st.success("💥 Base de dados recriada com sucesso! Todos os horários estão limpos.")
                 st.session_state["confirmar_limpeza"] = False
                 st.rerun()
         with col_nao:
