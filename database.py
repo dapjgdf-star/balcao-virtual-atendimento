@@ -8,6 +8,7 @@ import streamlit as st
 # Bibliotecas oficiais do Google API Client
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError  # Importado para extrair detalhes reais do erro HTTP
 
 DB_NAME = "balcao_virtual.db"
 CALENDAR_ID = "dapj.gdf@gmail.com"
@@ -16,7 +17,7 @@ GOOGLE_CREDENTIALS_FILE = "credentials.json"
 def obter_servico_google():
     """
     Autentica na API do Google Calendar de forma híbrida e ultra-robusta.
-    Tenta decodificar a chave a partir do Streamlit Cloud em múltiplos formatos.
+    Tenta decodificar a chave a partir dos Secrets do Streamlit Cloud (Nuvem).
     """
     scopes = ['https://www.googleapis.com/auth/calendar']
     info = None
@@ -130,16 +131,16 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
     if not service:
         return f"https://meet.google.com/mock-vrt-{data.replace('-', '')}"
         
-    # CORREÇÃO CRÍTICA 1: Formatação RFC3339 estrita adicionando o offset de fuso horário (-03:00) para Brasília
+    # Formatação RFC3339 estrita adicionando o offset de fuso horário (-03:00) para Brasília
     start_time = f"{data}T{hora_inicio}:00-03:00"
     end_time = f"{data}T{hora_fim}:00-03:00"
     
-    # CORREÇÃO CRÍTICA 2: Gerador de ID de requisição 100% único para evitar erros de duplicidade do Meet no Google
+    # Gerador de ID de requisição 100% único para evitar erros de duplicidade do Meet no Google
     unique_request_id = f"req-{data}-{hora_inicio.replace(':', '')}-{str(uuid.uuid4())[:8]}"
     
     event_body = {
         'summary': f'Atendimento Virtual: {nome}',
-        'description': f'Dúvida/Assunto registrado pelo usuário:\n{duvida}',
+        'description': f'Dúvida/Assunto registado pelo utilizador:\n{duvida}',
         'start': {
             'dateTime': start_time,
             'timeZone': 'America/Sao_Paulo',
@@ -148,7 +149,7 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
             'dateTime': end_time,
             'timeZone': 'America/Sao_Paulo',
         },
-        # CORREÇÃO CRÍTICA 3: Removido o CALENDAR_ID da lista de convidados para evitar erro de auto-convite na própria agenda
+        # Removido o CALENDAR_ID da lista de convidados para evitar erro de auto-convite na própria agenda
         'attendees': [
             {'email': email}
         ],
@@ -180,9 +181,17 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
         if "ultimo_erro_google" in st.session_state:
             del st.session_state["ultimo_erro_google"]
         return meet_link
+    except HttpError as e:
+        # Extrai os detalhes reais e legíveis do erro vindos diretamente da API do Google
+        try:
+            error_details = json.loads(e.content.decode('utf-8'))
+            msg_erro = error_details.get('error', {}).get('message', str(e))
+        except:
+            msg_erro = str(e)
+        st.session_state["ultimo_erro_google"] = f"Falha na API do Calendário Google: {msg_erro}"
+        return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
     except Exception as e:
-        # Armazena o erro exato retornado pelos servidores do Google para exibição diagnóstica
-        st.session_state["ultimo_erro_google"] = f"Falha na API de criação do Google Calendar: {e}"
+        st.session_state["ultimo_erro_google"] = f"Falha inesperada no registo do evento: {e}"
         return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
 
 def listar_slots_por_data(data_str):
@@ -239,7 +248,7 @@ def realizar_agendamento(slot_id, nome, email, duvida):
 def limpar_banco():
     """
     Deleta a estrutura existente e força a reinicialização limpa
-    para reestruturar o banco de dados com os novos horários configurados.
+    para reestruturar a base de dados com os novos horários configurados.
     """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
@@ -247,5 +256,5 @@ def limpar_banco():
     conn.commit()
     conn.close()
     
-    # Recria o banco de dados carregando os slots vespertinos
+    # Recria a base de dados carregando os slots vespertinos
     inicializar_banco()
