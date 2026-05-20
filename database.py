@@ -25,12 +25,18 @@ def obter_servico_google():
         try:
             # Converte a string de texto JSON dos Secrets para um dicionário Python
             info = json.loads(st.secrets["google_credentials_json"])
+            
+            # CORREÇÃO CRÍTICA: Corrige as quebras de linha (\n) duplicadas pelo TOML do Streamlit Cloud
+            if "private_key" in info:
+                info["private_key"] = info["private_key"].replace("\\n", "\n")
+                
             creds = service_account.Credentials.from_service_account_info(
                 info, scopes=scopes
             )
             return build('calendar', 'v3', credentials=creds)
         except Exception as e:
-            # Caso ocorra algum erro na leitura dos segredos da nuvem, prossegue para o fallback
+            # Reporta de forma discreta o erro nos logs internos da barra lateral para depuração
+            st.sidebar.error(f"⚠️ Erro de Autenticação (Secrets): {e}")
             pass
 
     # Caminho 2: Procura pelo ficheiro físico local no computador (Desenvolvimento)
@@ -41,6 +47,7 @@ def obter_servico_google():
             )
             return build('calendar', 'v3', credentials=creds)
         except Exception as e:
+            st.sidebar.error(f"⚠️ Erro de Autenticação (Ficheiro Local): {e}")
             pass
         
     return None
@@ -104,7 +111,7 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
     """Cria o evento real no Google Calendar e solicita o link do Google Meet."""
     service = obter_servico_google()
     
-    # Se não houver autenticação configurada, gera o link de simulação
+    # Se não houver autenticação configurada ou ativa, gera o link de simulação
     if not service:
         return f"https://meet.google.com/mock-vrt-{data.replace('-', '')}"
         
@@ -153,7 +160,7 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
         meet_link = event.get('conferenceData', {}).get('entryPoints', [{}])[0].get('uri', '')
         return meet_link
     except Exception as e:
-        print(f"Erro ao ligar com a API do Google Calendar: {e}")
+        st.sidebar.error(f"❌ Erro na API do Calendário: {e}")
         return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
 
 def listar_slots_por_data(data_str):
