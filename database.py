@@ -62,7 +62,7 @@ def inicializar_banco():
             duvida TEXT,
             meet_link TEXT
         )
-    ''''')
+    ''')
     conn.commit()
     
     # Verifica se já existem registos populados
@@ -206,3 +206,21 @@ def realizar_agendamento(slot_id, nome, email, duvida):
     conn.close()
     
     return meet_link if success else None
+
+def limpar_banco():
+    """
+    Reseta todos os agendamentos marcados de volta para 'Disponivel' 
+    e limpa as informações de utilizadores, dúvidas e links das salas.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE slots
+        SET status = 'Disponivel',
+            nome_usuario = NULL,
+            email_usuario = NULL,
+            duvida = NULL,
+            meet_link = NULL
+    ''')
+    conn.commit()
+    conn.close()
