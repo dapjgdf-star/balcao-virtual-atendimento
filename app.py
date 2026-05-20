@@ -26,7 +26,6 @@ menu = st.sidebar.radio("Navegar por:", ["Área do Usuário (Agendamento)", "Pai
 if menu == "Área do Usuário (Agendamento)":
     
     # --- FLUXO DE CONFIRMAÇÃO PERSISTENTE ---
-    # Impede que a tela atualize instantaneamente e apague as informações do Meet recém-criadas
     if "sucesso_agendamento" in st.session_state:
         detalhes = st.session_state["sucesso_agendamento"]
         st.success("🎉 Agendamento realizado com sucesso!")
@@ -70,7 +69,8 @@ if menu == "Área do Usuário (Agendamento)":
         else:
             slots = listar_slots_por_data(data_str)
             
-            st.subheader(f"Horários disponíveis para o turno Vespertino em {data_selecionada.strftime('%d/%m/%Y')}:")
+            # Ajuste dinâmico de texto para informar o turno com base nos slots populados
+            st.subheader(f"Horários disponíveis em {data_selecionada.strftime('%d/%m/%Y')}:")
             
             # Renderização dos horários em formato de Grid de Cards usando colunas
             cols = st.columns(4)
@@ -133,6 +133,13 @@ elif menu == "Painel do Administrador":
     st.header("📊 Painel de Controle - Gerenciamento de Atendimentos")
     st.write(f"Perfil de monitoramento ativo: **{CALENDAR_ID}**")
     
+    # --- VISUALIZADOR DE ERROS DE CONEXÃO DO GOOGLE ---
+    # Mostra de forma clara e legível ao administrador se a conexão com o Google falhar
+    if "erro_autenticacao" in st.session_state:
+        st.error(f"❌ **Falha na Conexão Google (Nuvem):** {st.session_state['erro_autenticacao']}")
+    if "ultimo_erro_google" in st.session_state:
+        st.error(f"❌ **Erro no Registro de Eventos da API:** {st.session_state['ultimo_erro_google']}")
+    
     agendamentos = obter_agendamentos_completos()
     
     if not agendamentos:
@@ -183,13 +190,13 @@ elif menu == "Painel do Administrador":
             st.rerun()
     else:
         # Seção de confirmação estrita solicitada pelo utilizador
-        st.warning("⚠️ **Tem a certeza de que deseja prosseguir com esta ação?** Todos os agendamentos salvos serão eliminados permanentemente e voltarão ao estado Disponível!")
+        st.warning("⚠️ **Tem a certeza de que deseja prosseguir com esta ação?** Todos os agendamentos salvos serão eliminados permanentemente, a tabela antiga será recriada e os slots vespertinos corretos serão redefinidos!")
         
         col_sim, col_nao = st.columns(2)
         with col_sim:
             if st.button("✅ Sim, limpar permanentemente", type="primary", use_container_width=True):
                 limpar_banco()
-                st.success("💥 Base de dados limpa com sucesso! Todos os horários voltaram a ficar disponíveis.")
+                st.success("💥 Base de dados recriada com sucesso! Todos os novos horários vespertinos já estão disponíveis.")
                 st.session_state["confirmar_limpeza"] = False
                 st.rerun()
         with col_nao:
