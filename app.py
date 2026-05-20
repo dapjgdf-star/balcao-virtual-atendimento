@@ -63,10 +63,11 @@ def obter_servico_google():
     return None
 
 def inicializar_banco():
-    """Cria a base de dados incluindo o novo campo de telefone."""
+    """Cria a base de dados e realiza migração automática caso necessário."""
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     
+    # Cria a tabela caso não exista (já com a nova estrutura ideal)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS slots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -82,6 +83,17 @@ def inicializar_banco():
         )
     ''')
     conn.commit()
+    
+    # --- MIGRAÇÃO AUTOMÁTICA ---
+    # Verifica dinamicamente as colunas existentes na tabela slots
+    cursor.execute("PRAGMA table_info(slots)")
+    colunas = [coluna[1] for coluna in cursor.fetchall()]
+    
+    # Se a coluna 'telefone_usuario' não existir (base antiga), adiciona-a agora sem quebrar nada
+    if "telefone_usuario" not in colunas:
+        cursor.execute("ALTER TABLE slots ADD COLUMN telefone_usuario TEXT")
+        conn.commit()
+    # ---------------------------
     
     cursor.execute("SELECT COUNT(*) FROM slots")
     if cursor.fetchone()[0] == 0:
