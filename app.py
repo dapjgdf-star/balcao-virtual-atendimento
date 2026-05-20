@@ -7,7 +7,7 @@ from database import (
     realizar_agendamento, 
     obter_agendamentos_completos,
     CALENDAR_ID,
-    limpar_banco  # Importação adicionada para a funcionalidade de reset
+    limpar_banco
 )
 
 # Configurações de layout da página
@@ -24,84 +24,109 @@ menu = st.sidebar.radio("Navegar por:", ["Área do Usuário (Agendamento)", "Pai
 
 # --- VISÃO 1: ÁREA DO USUÁRIO ---
 if menu == "Área do Usuário (Agendamento)":
-    st.header("📅 Selecione uma Data e Horário")
     
-    # Limita o calendário do Streamlit estritamente dentro da vigência configurada
-    data_minima = datetime.date(2026, 5, 21)
-    data_maxima = datetime.date(2026, 5, 29)  # Trava manual ajustada para 29/05/2026
-    
-    # Seletor de data formatado no padrão brasileiro DD/MM/AAAA
-    data_selecionada = st.date_input(
-        "Selecione o dia do atendimento:",
-        value=data_minima,
-        min_value=data_minima,
-        max_value=data_maxima,
-        format="DD/MM/YYYY"
-    )
-    
-    data_str = data_selecionada.strftime("%Y-%m-%d")
-    
-    # Valida se o usuário escolheu um final de semana diretamente no componente
-    if data_selecionada.weekday() >= 5:
-        st.warning("O balcão virtual opera apenas em dias úteis (Segunda a Sexta). Por favor, mude a data acima.")
-    else:
-        slots = listar_slots_por_data(data_str)
+    # --- FLUXO DE CONFIRMAÇÃO PERSISTENTE ---
+    # Impede que a tela atualize instantaneamente e apague as informações do Meet recém-criadas
+    if "sucesso_agendamento" in st.session_state:
+        detalhes = st.session_state["sucesso_agendamento"]
+        st.success("🎉 Agendamento realizado com sucesso!")
+        st.balloons()
         
-        st.subheader(f"Horários disponíveis para o turno Vespertino em {data_selecionada.strftime('%d/%m/%Y')}:")
+        st.subheader("📋 Detalhes do seu Atendimento")
+        st.info(f"**Importante:** Um convite oficial do Google Agenda contendo o link do Meet foi enviado para o e-mail **{detalhes['email']}**.")
         
-        # Renderização dos horários em formato de Grid de Cards usando colunas
-        cols = st.columns(4)
-        slot_selecionado = None
+        st.markdown(f"**Data Selecionada:** {detalhes['data']}")
+        st.markdown(f"**Horário Reservado:** {detalhes['horario']}")
+        st.markdown(f"**Nome do Solicitante:** {detalhes['nome']}")
         
-        for idx, (slot_id, inicio, fim, status) in enumerate(slots):
-            col = cols[idx % 4]
-            if status == "Disponivel":
-                if col.button(f"🟢 {inicio} - {fim}", key=f"btn_{slot_id}", use_container_width=True):
-                    st.session_state["id_selecionado"] = slot_id
-                    st.session_state["horario_texto"] = f"{inicio} às {fim}"
-            else:
-                col.button(f"🔴 {inicio} - {fim} (Ocupado)", key=f"btn_{slot_id}", disabled=True, use_container_width=True)
+        st.code(f"Link da sua sala virtual: {detalhes['link']}", language="text")
+        st.markdown(f"### [👉 Clique aqui para entrar direto no Google Meet]({detalhes['link']})")
         
-        # Se um horário foi clicado, abre o formulário de cadastro logo abaixo
-        if "id_selecionado" in st.session_state:
-            st.write("---")
-            st.subheader(f"Confirmar Agendamento para às {st.session_state['horario_texto']}")
+        if st.button("Agendar outro Horário", type="primary", use_container_width=True):
+            del st.session_state["sucesso_agendamento"]
+            st.rerun()
             
-            with st.form(key="form_agendamento", clear_on_submit=True):
-                nome = st.text_input("Seu Nome Completo *")
-                email = st.text_input("Seu E-mail * (O link do Google Meet será enviado para cá)")
-                duvida = st.text_area("Descreva de forma breve sua dúvida ou assunto *")
+    else:
+        st.header("📅 Selecione uma Data e Horário")
+        
+        # Limita o calendário do Streamlit estritamente dentro da vigência configurada
+        data_minima = datetime.date(2026, 5, 21)
+        data_maxima = datetime.date(2026, 5, 29)  # Trava manual ajustada para 29/05/2026
+        
+        # Seletor de data formatado no padrão brasileiro DD/MM/AAAA
+        data_selecionada = st.date_input(
+            "Selecione o dia do atendimento:",
+            value=data_minima,
+            min_value=data_minima,
+            max_value=data_maxima,
+            format="DD/MM/YYYY"
+        )
+        
+        data_str = data_selecionada.strftime("%Y-%m-%d")
+        
+        # Valida se o usuário escolheu um final de semana diretamente no componente
+        if data_selecionada.weekday() >= 5:
+            st.warning("O balcão virtual opera apenas em dias úteis (Segunda a Sexta). Por favor, mude a data acima.")
+        else:
+            slots = listar_slots_por_data(data_str)
+            
+            st.subheader(f"Horários disponíveis para o turno Vespertino em {data_selecionada.strftime('%d/%m/%Y')}:")
+            
+            # Renderização dos horários em formato de Grid de Cards usando colunas
+            cols = st.columns(4)
+            slot_selecionado = None
+            
+            for idx, (slot_id, inicio, fim, status) in enumerate(slots):
+                col = cols[idx % 4]
+                if status == "Disponivel":
+                    if col.button(f"🟢 {inicio} - {fim}", key=f"btn_{slot_id}", use_container_width=True):
+                        st.session_state["id_selecionado"] = slot_id
+                        st.session_state["horario_texto"] = f"{inicio} às {fim}"
+                else:
+                    col.button(f"🔴 {inicio} - {fim} (Ocupado)", key=f"btn_{slot_id}", disabled=True, use_container_width=True)
+            
+            # Se um horário foi clicado, abre o formulário de cadastro logo abaixo
+            if "id_selecionado" in st.session_state:
+                st.write("---")
+                st.subheader(f"Confirmar Agendamento para às {st.session_state['horario_texto']}")
                 
-                enviar = st.form_submit_button("Confirmar Horário de Atendimento")
-                
-                if enviar:
-                    if not nome or not email or not duvida:
-                        st.error("Por favor, preencha todos os campos obrigatórios marcados com (*).")
-                    elif "@" not in email:
-                        st.error("Insira um endereço de e-mail válido para receber o convite.")
-                    else:
-                        with st.spinner("Conectando ao Google Agenda e gerando sua sala do Meet..."):
-                            link_meet = realizar_agendamento(
-                                st.session_state["id_selecionado"], 
-                                nome, 
-                                email, 
-                                duvida
-                            )
-                            
-                        if link_meet:
-                            st.success("🎉 Agendamento realizado com sucesso!")
-                            st.balloons()
-                            
-                            # Caixa de destaque contendo as informações e ações para o usuário
-                            st.info(f"**Importante:** Um convite oficial do Google Calendar foi enviado para **{email}**.")
-                            st.code(f"Link da sua sala virtual: {link_meet}", language="text")
-                            st.markdown(f"[Clique aqui para entrar direto no Google Meet]({link_meet})")
-                            
-                            # Limpa o estado da sessão para evitar reenvios acidentais
-                            del st.session_state["id_selecionado"]
-                            st.rerun()
+                with st.form(key="form_agendamento", clear_on_submit=True):
+                    nome = st.text_input("Seu Nome Completo *")
+                    email = st.text_input("Seu E-mail * (O link do Google Meet será enviado para cá)")
+                    duvida = st.text_area("Descreva de forma breve sua dúvida ou assunto *")
+                    
+                    enviar = st.form_submit_button("Confirmar Horário de Atendimento")
+                    
+                    if enviar:
+                        if not nome or not email or not duvida:
+                            st.error("Por favor, preencha todos os campos obrigatórios marcados com (*).")
+                        elif "@" not in email:
+                            st.error("Insira um endereço de e-mail válido para receber o convite.")
                         else:
-                            st.error("Este horário acabou de ser reservado por outro usuário. Por favor, escolha outro slot.")
+                            with st.spinner("Conectando ao Google Agenda e gerando sua sala do Meet..."):
+                                link_meet = realizar_agendamento(
+                                    st.session_state["id_selecionado"], 
+                                    nome, 
+                                    email, 
+                                    duvida
+                                )
+                                
+                            if link_meet:
+                                # Salva os detalhes do agendamento de forma persistente antes do Rerun
+                                st.session_state["sucesso_agendamento"] = {
+                                    "nome": nome,
+                                    "email": email,
+                                    "link": link_meet,
+                                    "data": data_selecionada.strftime('%d/%m/%Y'),
+                                    "horario": st.session_state['horario_texto']
+                                }
+                                # Limpa o estado atual de seleção para o próximo agendamento
+                                del st.session_state["id_selecionado"]
+                                if "horario_texto" in st.session_state:
+                                    del st.session_state["horario_texto"]
+                                st.rerun()
+                            else:
+                                st.error("Este horário acabou de ser reservado por outro usuário. Por favor, escolha outro slot.")
 
 # --- VISÃO 2: PAINEL DO ADMINISTRADOR ---
 elif menu == "Painel do Administrador":
