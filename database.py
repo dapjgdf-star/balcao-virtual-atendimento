@@ -14,30 +14,45 @@ GOOGLE_CREDENTIALS_FILE = "credentials.json"
 
 def obter_servico_google():
     """
-    Autentica na API do Google Calendar de forma híbrida.
-    Tenta primeiro ler a partir dos Secrets do Streamlit Cloud (Nuvem).
-    Caso não existam, procura pelo ficheiro local de credenciais.
+    Autentica na API do Google Calendar de forma híbrida e ultra-robusta.
+    Tenta decodificar a chave a partir do Streamlit Cloud em múltiplos formatos.
     """
     scopes = ['https://www.googleapis.com/auth/calendar']
+    info = None
     
     # Caminho 1: Verificação de credenciais nos Secrets do Streamlit (Nuvem)
-    if "google_credentials_json" in st.secrets:
-        try:
-            # Converte a string de texto JSON dos Secrets para um dicionário Python
-            info = json.loads(st.secrets["google_credentials_json"])
-            
-            # CORREÇÃO CRÍTICA: Corrige as quebras de linha (\n) duplicadas pelo TOML do Streamlit Cloud
+    try:
+        # Caso A: Colado diretamente como chaves TOML raíz
+        if "private_key" in st.secrets:
+            info = dict(st.secrets)
+        # Caso B: Colado sob a seção [gcp_service_account]
+        elif "gcp_service_account" in st.secrets:
+            info = dict(st.secrets["gcp_service_account"])
+        # Caso C: Colado sob a variável google_credentials_json como string JSON
+        elif "google_credentials_json" in st.secrets:
+            raw_json = st.secrets["google_credentials_json"]
+            if isinstance(raw_json, dict):
+                info = raw_json
+            else:
+                # strict=False ignora quebras de linha literais introduzidas pelo TOML
+                info = json.loads(raw_json, strict=False)
+        
+        if info:
+            # Corrige as quebras de linha (\n) duplicadas ou mal formatadas
             if "private_key" in info:
                 info["private_key"] = info["private_key"].replace("\\n", "\n")
                 
             creds = service_account.Credentials.from_service_account_info(
                 info, scopes=scopes
             )
+            # Remove mensagem de erro anterior se autenticou com sucesso
+            if "erro_autenticacao" in st.session_state:
+                del st.session_state["erro_autenticacao"]
             return build('calendar', 'v3', credentials=creds)
-        except Exception as e:
-            # Reporta de forma discreta o erro nos logs internos da barra lateral para depuração
-            st.sidebar.error(f"⚠️ Erro de Autenticação (Secrets): {e}")
-            pass
+        else:
+            st.session_state["erro_autenticacao"] = "Nenhuma credencial do Google encontrada nos Secrets do Streamlit."
+    except Exception as e:
+        st.session_state["erro_autenticacao"] = f"Erro ao decodificar chaves do Google Cloud: {e}"
 
     # Caminho 2: Procura pelo ficheiro físico local no computador (Desenvolvimento)
     if os.path.exists(GOOGLE_CREDENTIALS_FILE):
@@ -47,8 +62,7 @@ def obter_servico_google():
             )
             return build('calendar', 'v3', credentials=creds)
         except Exception as e:
-            st.sidebar.error(f"⚠️ Erro de Autenticação (Ficheiro Local): {e}")
-            pass
+            st.session_state["erro_autenticacao_local"] = f"Erro no ficheiro local credentials.json: {e}"
         
     return None
 
@@ -158,9 +172,11 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
         
         # Extrai o link do Google Meet criado dinamicamente
         meet_link = event.get('conferenceData', {}).get('entryPoints', [{}])[0].get('uri', '')
+        if "ultimo_erro_google" in st.session_state:
+            del st.session_state["ultimo_erro_google"]
         return meet_link
     except Exception as e:
-        st.sidebar.error(f"❌ Erro na API do Calendário: {e}")
+        st.session_state["ultimo_erro_google"] = f"Falha na API de criação do Google Calendar: {e}"
         return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
 
 def listar_slots_por_data(data_str):
@@ -216,18 +232,14 @@ def realizar_agendamento(slot_id, nome, email, duvida):
 
 def limpar_banco():
     """
-    Reseta todos os agendamentos marcados de volta para 'Disponivel' 
-    e limpa as informações de utilizadores, dúvidas e links das salas.
+    Deleta a estrutura existente e força a reinicialização limpa
+    para reestruturar o banco de dados com os novos horários configurados.
     """
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('''
-        UPDATE slots
-        SET status = 'Disponivel',
-            nome_usuario = NULL,
-            email_usuario = NULL,
-            duvida = NULL,
-            meet_link = NULL
-    ''')
+    cursor.execute("DROP TABLE IF EXISTS slots")
     conn.commit()
     conn.close()
+    
+    # Recria o banco de dados carregando os slots vespertinos
+    inicializar_banco()
