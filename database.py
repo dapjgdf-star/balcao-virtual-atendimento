@@ -8,7 +8,6 @@ import streamlit as st
 # Bibliotecas oficiais do Google API Client
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.errors import HttpError  # Importado para extrair detalhes reais do erro HTTP
 
 DB_NAME = "balcao_virtual.db"
 CALENDAR_ID = "dapj.gdf@gmail.com"
@@ -181,17 +180,27 @@ def criar_evento_google_meet(data, hora_inicio, hora_fim, nome, email, duvida):
         if "ultimo_erro_google" in st.session_state:
             del st.session_state["ultimo_erro_google"]
         return meet_link
-    except HttpError as e:
-        # Extrai os detalhes reais e legíveis do erro vindos diretamente da API do Google
-        try:
-            error_details = json.loads(e.content.decode('utf-8'))
-            msg_erro = error_details.get('error', {}).get('message', str(e))
-        except:
-            msg_erro = str(e)
-        st.session_state["ultimo_erro_google"] = f"Falha na API do Calendário Google: {msg_erro}"
-        return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
     except Exception as e:
-        st.session_state["ultimo_erro_google"] = f"Falha inesperada no registo do evento: {e}"
+        # CAPTURA ULTRA-ROBUSTA: Registra todas as informações possíveis do erro para depuração detalhada
+        error_type = type(e).__name__
+        error_repr = repr(e)
+        error_str = str(e)
+        
+        detalhes_erro = (
+            f"Classe de Erro: {error_type}\n"
+            f"Mensagem (str): {error_str}\n"
+            f"Representação (repr): {error_repr}\n"
+        )
+        
+        # Tenta extrair a resposta decodificada se for uma falha de API do Google com conteúdo JSON
+        if hasattr(e, 'content') and e.content:
+            try:
+                content_decoded = e.content.decode('utf-8')
+                detalhes_erro += f"Conteúdo do Erro (JSON do Google): {content_decoded}\n"
+            except Exception:
+                pass
+                
+        st.session_state["ultimo_erro_google"] = detalhes_erro
         return f"https://meet.google.com/fail-vrt-{data.replace('-', '')}"
 
 def listar_slots_por_data(data_str):
